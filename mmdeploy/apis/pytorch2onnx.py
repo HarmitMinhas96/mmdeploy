@@ -54,6 +54,26 @@ def torch2onnx_impl(model: torch.nn.Module, input: Union[torch.Tensor, Tuple],
                 'keep_initializers_as_inputs'],
             verbose=verbose)
 
+def add_image_norm(model):
+    assert model.cfg, "Expected model config to not be empty"
+    img_norm_cfg = None
+    for step in model.cfg.train_pipeline:
+        if step.type == 'NormalizeTensor':
+            img_norm_cfg = step
+    
+    if not img_norm_cfg:
+        return model
+    
+    def pre_forward(_, input):
+        mean = torch.tensor(img_norm_cfg['mean'])[None, ..., None,
+                                                        None]
+        std = torch.tensor(img_norm_cfg['std'])[None, ..., None,
+                                                None]
+        input_ret = [(i - mean) / std for i in input]
+        return type(input)(input_ret)
+
+    model.register_forward_pre_hook(pre_forward)
+    return model
 
 def torch2onnx(img: Any,
                work_dir: str,
@@ -61,7 +81,8 @@ def torch2onnx(img: Any,
                deploy_cfg: Union[str, mmcv.Config],
                model_cfg: Union[str, mmcv.Config],
                model_checkpoint: Optional[str] = None,
-               device: str = 'cuda:0'):
+               device: str = 'cuda:0',
+               normalize_in_graph: bool = False):
     """Convert PyTorch model to ONNX model.
 
     Examples:
@@ -78,6 +99,7 @@ def torch2onnx(img: Any,
         >>> device = 'cpu'
         >>> torch2onnx(img, work_dir, save_file, deploy_cfg, \
             model_cfg, model_checkpoint, device)
+        >>> normalize_in_graph = True
 
     Args:
         img (str | np.ndarray | torch.Tensor): Input image used to assist
@@ -90,6 +112,8 @@ def torch2onnx(img: Any,
         model_checkpoint (str): A checkpoint path of PyTorch model,
             defaults to `None`.
         device (str): A string specifying device type, defaults to 'cuda:0'.
+        normalize_in_graph (bool): Whether image normalization should be added to the graph.
+            This allows for inferencing in standalone inference servers.
     """
     # load deploy_cfg if necessary
     deploy_cfg, model_cfg = load_config(deploy_cfg, model_cfg)
@@ -102,6 +126,9 @@ def torch2onnx(img: Any,
     task_processor = build_task_processor(model_cfg, deploy_cfg, device)
 
     torch_model = task_processor.init_pytorch_model(model_checkpoint)
+    if normalize_in_graph:
+        add_image_norm(model)
+
     data, model_inputs = task_processor.create_input(img, input_shape)
     if not isinstance(model_inputs, torch.Tensor) and len(model_inputs) == 1:
         model_inputs = model_inputs[0]

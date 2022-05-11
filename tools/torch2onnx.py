@@ -15,6 +15,10 @@ def parse_args():
     parser.add_argument('img', help='image used to convert model model')
     parser.add_argument('output', help='output onnx path')
     parser.add_argument(
+        '--normalize-in-graph',
+        action='store_true',
+        help='Whether to include image normalization in ONNX graph.')
+    parser.add_argument(
         '--device', help='device used for conversion', default='cpu')
     parser.add_argument(
         '--log-level',
@@ -37,6 +41,7 @@ def main():
     output_path = args.output
     work_dir, save_file = osp.split(output_path)
     device = args.device
+    normalize_in_graph = args.normalize_in_graph
 
     logger.info(f'torch2onnx: \n\tmodel_cfg: {model_cfg_path} '
                 f'\n\tdeploy_cfg: {deploy_cfg_path}')
@@ -48,7 +53,8 @@ def main():
             deploy_cfg=deploy_cfg_path,
             model_cfg=model_cfg_path,
             model_checkpoint=checkpoint_path,
-            device=device)
+            device=device,
+            normalize_in_graph=normalize_in_graph)
         logger.info('torch2onnx success.')
     except Exception as e:
         logger.error(e)
